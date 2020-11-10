@@ -75,6 +75,11 @@ let fixupRefs = (obj) => {
         if(obj.$ref && obj.$ref.startsWith(argv.jsonfile + '#/properties/')) {
             obj.$ref = '#/components/schemas/' + argv.importPrefix + obj.$ref.substring(argv.jsonfile.length+13);
         }
+
+        // original oasSpec will have $refs to the argv.jsonfile#/definitions (which don't have importPrefix)
+        if(obj.$ref && obj.$ref.startsWith(argv.jsonfile + '#/definitions/')) {
+            obj.$ref = '#/components/schemas/' + obj.$ref.substring(argv.jsonfile.length+14);
+        }
     });
 
     return obj;
@@ -145,8 +150,8 @@ Object.keys(oasSpec.components.schemas).forEach((key, ndx, keys) => {
     }
 });
 
-// the result string...
-s = yaml.stringify(oasSpec);
+// the result string... in YAML or JSON as requested
+s = (argv.outfile && argv.outfile.endsWith('.json')) ?  JSON.stringify(oasSpec, null, 2) : yaml.stringify(oasSpec);
 
 // write it to the correct place...
 if (argv.outfile) {

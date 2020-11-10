@@ -39,6 +39,12 @@ will resolve the `$refs` in `openApi.yaml` that point to `jsonSchema.yaml`,  usi
 
 
 ```bash
+  openapi-inhale -i create -- openApi.yaml jsonSchema.yaml output.json
+```
+will do the same, except the result outfile will be in JSON format.
+
+
+```bash
   openapi-inhale -d -i patch -- openApi.yaml jsonSchema.yaml output.yaml
 ```
 
