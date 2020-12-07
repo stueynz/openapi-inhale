@@ -3,6 +3,7 @@
 'use strict';
 
 const fs = require('fs');
+const { exit } = require('process');
 const yaml = require('yaml');
 const recurse = require('reftools/lib/recurse.js').recurse;
 
@@ -41,6 +42,11 @@ let argv = require('yargs')
 let s = fs.readFileSync(argv.oasfile,'utf8');
 let oasSpec = yaml.parse(s, {maxAliasCount: argv.maxAliasCount});
 
+if(! oasSpec.components || ! oasSpec.components.schemas) {
+    console.error("Whoops " + argv.oasfile + " doesn't appear to be an OpenAPI spec")
+    process.exit(1);
+}
+
 let j = fs.readFileSync(argv.jsonfile, 'utf8');
 let jsonSpec = yaml.parse(j, {maxAliasCount: argv.maxAliasCount});
 
@@ -60,9 +66,9 @@ let fixupRefs = (obj) => {
                 delete obj.title;
         }
 
-        // imported definitions/properties may have $refs to other properties...
+        // imported definitions/properties may have $refs to other properties in the imported schema - so add the prefix...
         if(obj.$ref && obj.$ref.startsWith('#/properties/')) {
-            obj.$ref = '#/components/schemas/' + obj.$ref.substring(13);
+            obj.$ref = '#/components/schemas/' + argv.importPrefix + obj.$ref.substring(13);
             
             // sibling annotations are not -strict
             if(obj.description)
@@ -105,40 +111,43 @@ if(! argv.definitions) {
 }
 
 let usedSchemas = [];
+var additions=0;
+
+// go looking for $refs,put the target schema into the list...
+let checkRefs = (obj, key, state) => {
+    if(obj.$ref && obj.$ref.startsWith('#/components/schemas/')) {
+
+        if(! usedSchemas.includes(obj.$ref.substring(21))) {
+            usedSchemas.push(obj.$ref.substring(21));
+            additions++;    // that's one more added ... naughty naughty global variable
+        }
+    }
+};
 
 // check oasSpec.paths to get the set of components/schemas that're actually used...
 Object.keys(oasSpec.paths).forEach((key, ndx, keys) => {
+    recurse(oasSpec.paths[key], {}, checkRefs);
+});
 
-    recurse(oasSpec.paths[key], {}, (obj, key, state) => {
+// check all the various components sections (parameters, responses, requestBodies, callbacks, etc)
+// for more $refs to components/schemas 
+Object.keys(oasSpec.components).forEach((section, ndx, sections) => {
 
-        // go looking for $refs
-        if(obj.$ref && obj.$ref.startsWith('#/components/schemas/')) {
+    // don't do component/schemas ... that has to be done carefully in just a sec
+    if(section != 'schemas') {
 
-            if(! usedSchemas.includes(obj.$ref.substring(21))) {
-                usedSchemas.push(obj.$ref.substring(21));
-            }
-        }
-    });
+        Object.keys(oasSpec.components[section]).forEach((key, ndx, keys) => {
+            recurse(oasSpec.components[section][key], {}, checkRefs);
+        });
+    }
 });
 
 
 // go looking for $refs in the set of usedSchemas...and augment the set of usedSchemas as appropriate
-var additions;
 do {    // keep going until we don't add any more schemas; cycles will break this.
     additions = 0;
     usedSchemas.forEach((key, ndx, keys) => {
-
-        recurse(oasSpec.components.schemas[key], {}, (obj, key, state) => {
-
-            // go looking for $refs
-            if(obj.$ref && obj.$ref.startsWith('#/components/schemas/')) {
-
-                if(! usedSchemas.includes(obj.$ref.substring(21))) {
-                    usedSchemas.push(obj.$ref.substring(21));
-                    additions++;
-                }
-            }
-        });
+        recurse(oasSpec.components.schemas[key], {}, checkRefs);
     });
 } while (additions > 0);
 
@@ -149,6 +158,7 @@ Object.keys(oasSpec.components.schemas).forEach((key, ndx, keys) => {
         delete oasSpec.components.schemas[key];
     }
 });
+
 
 // the result string... in YAML or JSON as requested
 s = (argv.outfile && argv.outfile.endsWith('.json')) ?  JSON.stringify(oasSpec, null, 2) : yaml.stringify(oasSpec);
