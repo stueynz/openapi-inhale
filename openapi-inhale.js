@@ -33,6 +33,16 @@ let argv = require('yargs')
     .default('i', 'imp')
     .describe('i', 'import prefix to be added to the front of imported properties')
 
+    .boolean('r')
+    .alias('r', 'removeValidation')
+    .default('r', false)
+    .describe('r', 'remove validation rules, in allOf: tag')
+
+    .boolean('c')
+    .alias('c', 'cleanUp')
+    .default('c', false)
+    .describe('c', 'don\'t clean up unused schemas')
+
     .default('maxAliasCount',100)
     .describe('maxAliasCount','maximum YAML aliases allowed')
     .help()
@@ -86,6 +96,10 @@ let fixupRefs = (obj) => {
         if(obj.$ref && obj.$ref.startsWith(argv.jsonfile + '#/definitions/')) {
             obj.$ref = '#/components/schemas/' + obj.$ref.substring(argv.jsonfile.length+14);
         }
+
+        // Rip off validation rules...
+        if(argv.removeValidation && obj.allOf)
+            delete obj.allOf;
     });
 
     return obj;
@@ -142,23 +156,24 @@ Object.keys(oasSpec.components).forEach((section, ndx, sections) => {
     }
 });
 
+if(argv.cleanUp) {
 
-// go looking for $refs in the set of usedSchemas...and augment the set of usedSchemas as appropriate
-do {    // keep going until we don't add any more schemas; cycles will break this.
-    additions = 0;
-    usedSchemas.forEach((key, ndx, keys) => {
-        recurse(oasSpec.components.schemas[key], {}, checkRefs);
+    // go looking for $refs in the set of usedSchemas...and augment the set of usedSchemas as appropriate
+    do {    // keep going until we don't add any more schemas; cycles will break this.
+        additions = 0;
+        usedSchemas.forEach((key, ndx, keys) => {
+            recurse(oasSpec.components.schemas[key], {}, checkRefs);
+        });
+    } while (additions > 0);
+
+    // prune the set of schemas in the original oasSpec, to be only the ones we're using...
+    Object.keys(oasSpec.components.schemas).forEach((key, ndx, keys) => {
+
+        if(! usedSchemas.includes(key)) {
+            delete oasSpec.components.schemas[key];
+        }
     });
-} while (additions > 0);
-
-// prune the set of schemas in the original oasSpec, to be only the ones we're using...
-Object.keys(oasSpec.components.schemas).forEach((key, ndx, keys) => {
-
-    if(! usedSchemas.includes(key)) {
-        delete oasSpec.components.schemas[key];
-    }
-});
-
+}
 
 // the result string... in YAML or JSON as requested
 s = (argv.outfile && argv.outfile.endsWith('.json')) ?  JSON.stringify(oasSpec, null, 2) : yaml.stringify(oasSpec);
